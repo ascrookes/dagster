@@ -323,27 +323,37 @@ def test_invoking_asset_with_context():
     assert out == 1
 
 
-def test_with_default_namespace():
+def test_with_replaced_asset_keys():
     @asset(ins={"input2": AssetIn(namespace="something_else")})
     def asset1(input1, input2):
         assert input1
         assert input2
 
-    namespaced = asset1.with_default_namespace(["abc", "123"])
-
-    assert namespaced.input_defs_by_asset_key[
-        AssetKey(["abc", "123", "input1"])
-    ].hardcoded_asset_key == AssetKey(["abc", "123", "input1"])
-    assert namespaced.input_defs_by_asset_key[AssetKey(["abc", "123", "input1"])].name == "input1"
-
-    assert namespaced.input_defs_by_asset_key[
-        AssetKey(["something_else", "input2"])
-    ].hardcoded_asset_key == AssetKey(["something_else", "input2"])
-    assert (
-        namespaced.input_defs_by_asset_key[AssetKey(["something_else", "input2"])].name == "input2"
+    replaced = asset1.with_replaced_asset_keys(
+        output_asset_key_replacements={
+            AssetKey(["asset1"]): AssetKey(["prefix1", "asset1_changed"])
+        },
+        input_asset_key_replacements={
+            AssetKey(["something_else", "input2"]): AssetKey(["apple", "banana"])
+        },
     )
 
-    assert namespaced.output_defs_by_asset_key[
-        AssetKey(["abc", "123", "asset1"])
-    ].hardcoded_asset_key == AssetKey(["abc", "123", "asset1"])
-    assert namespaced.output_defs_by_asset_key[AssetKey(["abc", "123", "asset1"])].name == "result"
+    assert replaced.dependency_asset_keys == {AssetKey("input1"), AssetKey(["apple", "banana"])}
+    assert replaced.asset_keys == {AssetKey(["prefix1", "asset1_changed"])}
+
+    assert replaced.input_defs_by_asset_key[AssetKey("input1")].hardcoded_asset_key == AssetKey(
+        "input1"
+    )
+    assert replaced.input_defs_by_asset_key[AssetKey("input1")].name == "input1"
+
+    assert replaced.input_defs_by_asset_key[
+        AssetKey(["apple", "banana"])
+    ].hardcoded_asset_key == AssetKey(["apple", "banana"])
+    assert replaced.input_defs_by_asset_key[AssetKey(["apple", "banana"])].name == "input2"
+
+    assert replaced.output_defs_by_asset_key[
+        AssetKey(["prefix1", "asset1_changed"])
+    ].hardcoded_asset_key == AssetKey(["prefix1", "asset1_changed"])
+    assert (
+        replaced.output_defs_by_asset_key[AssetKey(["prefix1", "asset1_changed"])].name == "result"
+    )

@@ -1,5 +1,5 @@
 import warnings
-from typing import AbstractSet, Mapping, Optional, Sequence
+from typing import AbstractSet, Iterable, Mapping, Optional
 
 from dagster import check
 from dagster.core.definitions import OpDefinition
@@ -40,6 +40,16 @@ class AssetsDefinition:
         return self._op
 
     @property
+    def asset_key(self) -> AssetKey:
+        check.invariant(
+            len(self._output_defs_by_asset_key) == 1,
+            "Tried to retrieve asset key from an assets definition with multiple asset keys: "
+            + ", ".join([str(ak.to_string()) for ak in self._output_defs_by_asset_key.keys()]),
+        )
+
+        return next(iter(self._output_defs_by_asset_key.keys()))
+
+    @property
     def asset_keys(self) -> AbstractSet[AssetKey]:
         return self._output_defs_by_asset_key.keys()
 
@@ -55,6 +65,10 @@ class AssetsDefinition:
     def partitions_def(self) -> Optional[PartitionsDefinition]:
         return self._partitions_def
 
+    @property
+    def dependency_asset_keys(self) -> Iterable[AssetKey]:
+        return self._input_defs_by_asset_key.keys()
+
     def get_partition_mapping(self, in_asset_key: AssetKey) -> PartitionMapping:
         if self._partitions_def is None:
             check.failed("Asset is not partitioned")
@@ -64,20 +78,27 @@ class AssetsDefinition:
             self._partitions_def.get_default_partition_mapping(),
         )
 
-    def with_default_namespace(self, namespace: Sequence[str]) -> "AssetsDefinition":
+    def with_replaced_asset_keys(
+        self,
+        output_asset_key_replacements: Mapping[AssetKey, AssetKey],
+        input_asset_key_replacements: Mapping[AssetKey, AssetKey],
+    ) -> "AssetsDefinition":
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=ExperimentalWarning)
 
             return self.__class__(
                 input_names_by_asset_key={
-                    key.with_default_namespace(namespace): input_def.name
+                    input_asset_key_replacements.get(key, key): input_def.name
                     for key, input_def in self.input_defs_by_asset_key.items()
                 },
                 output_names_by_asset_key={
-                    key.with_default_namespace(namespace): output_def.name
+                    output_asset_key_replacements.get(key, key): output_def.name
                     for key, output_def in self.output_defs_by_asset_key.items()
                 },
-                op=self.op.with_default_asset_namespace(namespace),
+                op=self.op.with_replaced_asset_keys(
+                    output_asset_key_replacements=output_asset_key_replacements,
+                    input_asset_key_replacements=input_asset_key_replacements,
+                ),
                 partitions_def=self.partitions_def,
                 partition_mappings=self._partition_mappings,
             )

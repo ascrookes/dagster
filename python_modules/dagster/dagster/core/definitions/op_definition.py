@@ -1,5 +1,6 @@
-from typing import Dict
+from typing import Dict, Mapping, cast
 
+from .events import AssetKey
 from .input import In
 from .output import Out
 from .solid_definition import SolidDefinition
@@ -73,3 +74,16 @@ class OpDefinition(SolidDefinition):
     @property
     def outs(self) -> Dict[str, Out]:
         return {output_def.name: Out.from_definition(output_def) for output_def in self.output_defs}
+
+    def with_replaced_asset_keys(
+        self,
+        output_asset_key_replacements: Mapping[AssetKey, AssetKey],
+        input_asset_key_replacements: Mapping[AssetKey, AssetKey],
+    ) -> "OpDefinition":
+        return cast(
+            "OpDefinition",
+            super().with_replaced_asset_keys(
+                output_asset_key_replacements=output_asset_key_replacements,
+                input_asset_key_replacements=input_asset_key_replacements,
+            ),
+        )

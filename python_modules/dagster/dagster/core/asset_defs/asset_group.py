@@ -3,7 +3,9 @@ import os
 import pkgutil
 import re
 import warnings
+from collections import defaultdict
 from importlib import import_module
+from itertools import chain
 from types import ModuleType
 from typing import (
     Any,
@@ -16,12 +18,14 @@ from typing import (
     Optional,
     Sequence,
     Set,
+    Tuple,
     Union,
     cast,
 )
 
 from dagster import check
 from dagster.core.definitions.events import AssetKey
+from dagster.core.errors import DagsterUnresolvedAssetDependencyError
 from dagster.core.execution.execute_in_process_result import ExecuteInProcessResult
 from dagster.core.storage.fs_asset_io_manager import fs_asset_io_manager
 from dagster.utils import merge_dicts
@@ -72,9 +76,6 @@ class AssetGroup(
             an error if provided by the user.
         executor_def (Optional[ExecutorDefinition]): The executor definition to
             use when re-materializing assets in this group.
-        default_namespace (Optional[Union[str, Sequence[str]]): Will be used as the namespace for
-            all assets in the group that do not have a namespace. I.e. it will be prepended to all
-            asset keys that only have a single component in their path.
 
     Examples:
 
@@ -111,13 +112,8 @@ class AssetGroup(
         source_assets: Optional[Sequence[SourceAsset]] = None,
         resource_defs: Optional[Mapping[str, ResourceDefinition]] = None,
         executor_def: Optional[ExecutorDefinition] = None,
-        default_namespace: Optional[Union[str, Sequence[str]]] = None,
     ):
         check.sequence_param(assets, "assets", of_type=AssetsDefinition)
-        if default_namespace:
-            if isinstance(default_namespace, str):
-                default_namespace = [default_namespace]
-            assets = [asset.with_default_namespace(default_namespace) for asset in assets]
 
         source_assets = check.opt_sequence_param(
             source_assets, "source_assets", of_type=SourceAsset
@@ -517,6 +513,86 @@ class AssetGroup(
             name="in_process_materialization_job", selection=selection
         ).execute_in_process()
 
+    def prefixed(self, key_prefix: str, upstream_groups: Optional[Sequence["AssetGroup"]] = None):
+        """
+        Returns an AssetGroup that's identical to this AssetGroup, but with prefixes on all the
+        asset keys.
+
+        Every asset definition has an asset key, as well as dependency asset keys that define which
+        other assets it depends on. These are handled differently.
+
+        For asset keys, we simply prepend the provided `prefix`.
+
+        For dependency asset keys, we match them to asset definitions and use the prefixes from those
+        asset definitions. The asset definitions used for this matching include assets in this
+        group, as well as assets in the `upstream_groups` argument.
+
+        If a dependency asset key cannot be matched to any asset definition, or if it matches to
+        multiple asset definitions, an error is raised.
+
+        Example with a single asset:
+
+            .. code-block:: python
+
+                @asset
+                def asset1():
+                    ...
+
+                result = AssetGroup([asset1]).prefixed("my_prefix")
+                assert result.assets[0].asset_key == AssetKey(["my_prefix", "asset1"])
+
+        Example with dependencies within the list of assets:
+
+            .. code-block:: python
+
+                @asset
+                def asset1():
+                    ...
+
+                @asset
+                def asset2(asset1):
+                    ...
+
+                result = AssetGroup([asset1, asset2]).prefixed("my_prefix")
+                assert result.assets[0].asset_key == AssetKey(["my_prefix", "asset1"])
+                assert result.assets[1].asset_key == AssetKey(["my_prefix", "asset2"])
+                assert result.assets[1].dependency_asset_keys == {AssetKey(["my_prefix", "asset1"])}
+
+        Examples with dependency prefixes provided by upstream assets:
+
+            .. code-block:: python
+
+                @asset
+                def asset1():
+                    ...
+
+                upstream_group = AssetGroup([asset1]).prefixed("upstream_prefix")
+
+                @asset
+                def asset2(asset1):
+                    ...
+
+                result = AssetGroup([asset2]).prefixed("my_prefix", upstream_groups=[upstream_group])
+                assert len(result.assets) == 1
+                assert result.assets[0].asset_key == AssetKey(["my_prefix", "asset2"])
+                assert result.assets[0].dependency_asset_keys == {AssetKey(["upstream_prefix", "asset1"])}
+        """
+
+        assets = assets_prefixed(
+            key_prefix=key_prefix,
+            assets=self.assets,
+            upstream_assets=chain(
+                *(group.assets for group in upstream_groups or []), self.source_assets
+            ),
+        )
+
+        return AssetGroup(
+            assets=assets,
+            source_assets=self.source_assets,
+            resource_defs={k: r for k, r in self.resource_defs.items() if k != "root_manager"},
+            executor_def=self.executor_def,
+        )
+
 
 from dagster.core.definitions.executor_definition import in_process_executor
 from dagster.core.errors import DagsterUnmetExecutorRequirementsError
@@ -592,3 +668,128 @@ def _validate_resource_reqs_for_asset_group(
                 "AssetGroup is missing required resource keys for resource '"
                 f"{resource_key}'. Missing resource keys: {missing_resource_keys}"
             )
+
+
+def assets_prefixed(
+    assets: Sequence[AssetsDefinition],
+    key_prefix: str,
+    upstream_assets: Optional[Iterable[Union[SourceAsset, AssetsDefinition]]] = None,
+) -> Sequence[AssetsDefinition]:
+    """
+    Returns a list of assets that's identical to the assets provided, but with prefixes on their
+    asset keys.
+
+    Every asset definition has an asset key, as well as dependency asset keys that define which
+    other assets it depends on. These are handled differently.
+
+    For asset keys, we simply prepend the provided `key_prefix`.
+
+    For dependency asset keys, we match them to asset definitions and use the prefixes from those
+    asset definitions. The asset definitions used for this matching include assets passed to the
+    `assets` argument, as well as assets passed to the `upstream_assets` argument.
+
+    If a dependency asset key cannot be matched to any asset definition, or if it matches to
+    multiple asset definitions, an error is raised.
+
+    Example with a single asset:
+
+        .. code-block:: python
+
+            @asset
+            def asset1():
+                ...
+
+            result = assets_prefixed([asset1], key_prefix="my_prefix")
+            assert result[0].asset_key == AssetKey(["my_prefix", "asset1"])
+
+    Example with dependencies within the list of assets:
+
+        .. code-block:: python
+
+            @asset
+            def asset1():
+                ...
+
+            @asset
+            def asset2(asset1):
+                ...
+
+            result = assets_prefixed([asset1, asset2], key_prefix="my_prefix")
+            assert result[0].asset_key == AssetKey(["my_prefix", "asset1"])
+            assert result[1].asset_key == AssetKey(["my_prefix", "asset2"])
+            assert result[1].dependency_asset_keys == {AssetKey(["my_prefix", "asset1"])}
+
+    Examples with dependency prefixes provided by upstream assets:
+
+        .. code-block:: python
+
+            @asset(key_prefix="upstream_prefix")
+            def asset1():
+                ...
+
+            @asset
+            def asset2(asset1):
+                ...
+
+            result = assets_prefixed([asset2], key_prefix="my_prefix", upstream_assets=[asset1])
+            assert len(result) == 1
+            assert result[0].asset_key == AssetKey(["my_prefix", "asset2"])
+            assert result[0].dependency_asset_keys == {AssetKey(["upstream_prefix", "asset1"])}
+    """
+    # First, we determine what the full asset key of every asset in play will be after the prefixes
+    # have been applied
+    full_asset_keys = []
+    for assets_def in assets:
+        for asset_key in assets_def.asset_keys:
+            full_asset_keys.append(AssetKey([key_prefix] + asset_key.path))
+
+    for assets_def in upstream_assets or []:
+        if isinstance(assets_def, SourceAsset):
+            full_asset_keys.append(assets_def.key)
+        else:
+            for asset_key in assets_def.asset_keys:
+                full_asset_keys.append(AssetKey(asset_key.path))
+
+    # Next, we build up a dictionary that will allow us to map dependency asset keys to the
+    # full asset keys that they should be resolved to
+    full_asset_keys_by_key_suffix: Dict[Tuple[str, ...], List[AssetKey]] = defaultdict(list)
+    for full_asset_key in full_asset_keys:
+        for i in range(len(full_asset_key.path)):
+            suffix = tuple(full_asset_key.path[-(i + 1) :])
+            full_asset_keys_by_key_suffix[suffix].append(full_asset_key)
+
+    # Finally, we resolve all the asset keys
+    result: List[AssetsDefinition] = []
+    for assets_def in assets:
+        output_asset_key_replacements = {
+            asset_key: AssetKey([key_prefix] + asset_key.path)
+            for asset_key in assets_def.asset_keys
+        }
+        input_asset_key_replacements = {}
+        for dep_asset_key in assets_def.dependency_asset_keys:
+            full_asset_keys = full_asset_keys_by_key_suffix[tuple(dep_asset_key.path)]
+            if len(full_asset_keys) != 1:
+                error_base = (
+                    f"Could not resolve dependency asset key {dep_asset_key.to_string()} "
+                    f"for asset {next(iter(assets_def.asset_keys)).to_string()}."
+                )
+
+                if len(full_asset_keys) == 0:
+                    raise DagsterUnresolvedAssetDependencyError(
+                        f"{error_base} No matching assets found."
+                    )
+                if len(full_asset_keys) > 1:
+                    raise DagsterUnresolvedAssetDependencyError(
+                        f"{error_base} Multiple matching assets found: {[ak.to_string() for ak in full_asset_keys]}."
+                    )
+
+            input_asset_key_replacements[dep_asset_key] = full_asset_keys[0]
+
+        result.append(
+            assets_def.with_replaced_asset_keys(
+                output_asset_key_replacements=output_asset_key_replacements,
+                input_asset_key_replacements=input_asset_key_replacements,
+            )
+        )
+
+    return result

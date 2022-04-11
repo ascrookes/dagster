@@ -548,3 +548,7 @@ class DagsterUnknownPartitionError(DagsterError):
     """
     The user has tried to access run config for a partition name that does not exist.
     """
+
+
+class DagsterUnresolvedAssetDependencyError(DagsterError):
+    """Could not resolve an asset dependency to an upstream asset."""

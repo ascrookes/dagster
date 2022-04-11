@@ -110,17 +110,14 @@ class AssetKey(NamedTuple("_AssetKey", [("path", List[str])])):
         return self.to_string() == other.to_string()
 
     def to_string(self, legacy: Optional[bool] = False) -> Optional[str]:
+        """
+        E.g. '["first_component", "second_component"]'
+        """
         if not self.path:
             return None
         if legacy:
             return ASSET_KEY_STRUCTURED_DELIMITER.join(self.path)
         return seven.json.dumps(self.path)
-
-    def with_default_namespace(self, namespace: Sequence[str]) -> "AssetKey":
-        if len(self.path) > 1:
-            return self
-        else:
-            return self.__class__(namespace + self.path)
 
     @staticmethod
     def from_db_string(asset_key_string: Optional[str]) -> Optional["AssetKey"]:

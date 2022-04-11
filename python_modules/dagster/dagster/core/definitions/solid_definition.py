@@ -6,6 +6,7 @@ from typing import (
     FrozenSet,
     Iterator,
     List,
+    Mapping,
     Optional,
     Sequence,
     Set,
@@ -28,6 +29,7 @@ from .definition_config_schema import (
     convert_user_facing_definition_config_schema,
 )
 from .dependency import IDependencyDefinition, NodeHandle, NodeInvocation
+from .events import AssetKey
 from .graph_definition import GraphDefinition
 from .input import InputDefinition, InputMapping
 from .node_definition import NodeDefinition
@@ -260,16 +262,30 @@ class SolidDefinition(NodeDefinition):
             retry_policy=self.retry_policy,
         )
 
-    def with_default_asset_namespace(self, asset_namespace: Sequence[str]) -> "SolidDefinition":
+    def with_replaced_asset_keys(
+        self,
+        output_asset_key_replacements: Mapping[AssetKey, AssetKey],
+        input_asset_key_replacements: Mapping[AssetKey, AssetKey],
+    ) -> "SolidDefinition":
         return self.__class__(
             name=self.name,
             input_defs=[
-                input_def.with_default_asset_namespace(asset_namespace)
+                input_def.with_asset_key(
+                    input_asset_key_replacements[input_def.hardcoded_asset_key]
+                )
+                if input_def.hardcoded_asset_key is not None
+                and input_def.hardcoded_asset_key in input_asset_key_replacements
+                else input_def
                 for input_def in self.input_defs
             ],
             compute_fn=self.compute_fn,
             output_defs=[
-                output_def.with_default_asset_namespace(asset_namespace)
+                output_def.with_asset_key(
+                    output_asset_key_replacements[output_def.hardcoded_asset_key]
+                )
+                if output_def.hardcoded_asset_key is not None
+                and output_def.hardcoded_asset_key in output_asset_key_replacements
+                else output_def
                 for output_def in self.output_defs
             ],
             config_schema=self.config_schema,
