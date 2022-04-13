@@ -5,7 +5,7 @@ import {Link} from 'react-router-dom';
 import styled from 'styled-components/macro';
 
 import {usePermissions} from '../app/Permissions';
-import {__ASSET_GROUP} from '../asset-graph/Utils';
+import {__ASSET_GROUP_PREFIX} from '../asset-graph/Utils';
 import {useSelectionReducer} from '../hooks/useSelectionReducer';
 import {PipelineSnapshotLink} from '../pipelines/PipelinePathUtils';
 import {PipelineReference} from '../pipelines/PipelineReference';
@@ -223,7 +223,7 @@ const RunRow: React.FC<{
       </td>
       <td>
         <Box flex={{direction: 'column', gap: 5}}>
-          {run.pipelineName !== __ASSET_GROUP ? (
+          {!run.pipelineName.startsWith(__ASSET_GROUP_PREFIX) ? (
             <Box flex={{direction: 'row', gap: 8, alignItems: 'center'}}>
               <PipelineReference
                 isJob={isJob}

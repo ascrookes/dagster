@@ -5,7 +5,7 @@ import styled from 'styled-components/macro';
 import {showCustomAlert} from '../app/CustomAlertProvider';
 import {filterByQuery} from '../app/GraphQueryImpl';
 import {PythonErrorInfo} from '../app/PythonErrorInfo';
-import {__ASSET_GROUP} from '../asset-graph/Utils';
+import {__ASSET_GROUP_PREFIX} from '../asset-graph/Utils';
 import {GanttChart, GanttChartLoadingState, GanttChartMode, QueuedState} from '../gantt/GanttChart';
 import {toGraphQueryItems} from '../gantt/toGraphQueryItems';
 import {useDocumentTitle} from '../hooks/useDocumentTitle';
@@ -57,9 +57,9 @@ export const Run: React.FC<RunProps> = (props) => {
   useFavicon(run ? runStatusFavicon(run.status) : '/favicon.svg');
   useDocumentTitle(
     run
-      ? `${run.pipelineName !== __ASSET_GROUP ? run.pipelineName : ''} ${runId.slice(0, 8)} [${
-          run.status
-        }]`
+      ? `${
+          !run.pipelineName.startsWith(__ASSET_GROUP_PREFIX) ? run.pipelineName : ''
+        } ${runId.slice(0, 8)} [${run.status}]`
       : `Run: ${runId}`,
   );
 

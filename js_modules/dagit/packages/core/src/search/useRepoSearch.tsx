@@ -3,7 +3,7 @@ import Fuse from 'fuse.js';
 import * as React from 'react';
 
 import {PYTHON_ERROR_FRAGMENT} from '../app/PythonErrorInfo';
-import {displayNameForAssetKey, __ASSET_GROUP} from '../asset-graph/Utils';
+import {displayNameForAssetKey, __ASSET_GROUP_PREFIX} from '../asset-graph/Utils';
 import {buildRepoPath} from '../workspace/buildRepoAddress';
 import {workspacePath} from '../workspace/workspacePath';
 
@@ -65,7 +65,7 @@ const bootstrapDataToSearchResults = (data?: SearchBootstrapQuery) => {
               },
             ];
           }, [] as SearchResult[])
-          .filter((item) => item.label !== __ASSET_GROUP);
+          .filter((item) => !item.label.startsWith(__ASSET_GROUP_PREFIX));
 
         const allSchedules: SearchResult[] = schedules.map((schedule) => ({
           key: `${repoPath}-${schedule.name}`,
